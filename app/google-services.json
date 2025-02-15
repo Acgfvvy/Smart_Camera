@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1043319005211",
+    "project_id": "smart-camera-omsjsr",
+    "storage_bucket": "smart-camera-omsjsr.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1043319005211:android:952ca658d20e079711d8be",
+        "android_client_info": {
+          "package_name": "com.abhyanshchannelac.smartcamera"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyACFtqd2IIlRdi-zb6ENnYqr6ASXYzAXjs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
