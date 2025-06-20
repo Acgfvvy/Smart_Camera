@@ -1,6 +1,8 @@
 package com.abhyanshchannelac.smartcamera.ui
 
+import com.google.firebase.analytics.FirebaseAnalytics
 import android.Manifest
+import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,7 +23,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.abhyanshchannelac.smartcamera.repository.ImageRecognitionRepository
-import com.abhyanshchannelac.smartcamera.analytics.AnalyticsManager
+import com.google.firebase.crashlytics.FirebaseCrashlytics
+import com.google.firebase.ktx.Firebase
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -29,6 +32,37 @@ import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.ui.text.font.FontWeight
+
+object AnalyticsManager {
+    private val crashlytics: FirebaseCrashlytics = FirebaseCrashlytics.getInstance()
+    private lateinit var analytics: FirebaseAnalytics
+
+    fun initialize(context: Context) {
+        analytics = FirebaseAnalytics.getInstance(context)
+    }
+
+    fun logEvent(event: String) {
+        analytics.logEvent(event, null)
+    }
+
+    fun logError(tag: String, message: String) {
+        crashlytics.log("Error in $tag: $message")
+    }
+
+    fun logImageCapture(success: Boolean) {
+        logEvent(if (success) "image_capture_success" else "image_capture_failure")
+    }
+
+    fun logImageAnalysis(tagCount: Int) {
+        logEvent("image_analysis_completed")
+        crashlytics.setCustomKey("tag_count", tagCount)
+    }
+
+    fun logThemeChange(isDarkTheme: Boolean) {
+        logEvent(if (isDarkTheme) "theme_dark" else "theme_light")
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,6 +91,7 @@ fun MainScreen(
     }
 
     LaunchedEffect(Unit) {
+        AnalyticsManager.initialize(context)
         cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
@@ -175,6 +210,16 @@ fun MainScreen(
                                             imageUri = Uri.fromFile(photoFile)
                                             showCamera = false
                                             AnalyticsManager.logImageCapture(true)
+                                            scope.launch {
+                                                try {
+                                                    tags = repository.getClarifaiTags(photoFile)
+                                                    AnalyticsManager.logImageAnalysis(tags.size)
+                                                } catch (e: Exception) {
+                                                    AnalyticsManager.logError("image_analysis", e.message ?: "Unknown error")
+                                                } finally {
+                                                    isLoading = false
+                                                }
+                                            }
                                         }
 
                                         override fun onError(exception: ImageCaptureException) {
@@ -182,15 +227,6 @@ fun MainScreen(
                                         }
                                     }
                                 )
-                            }
-                            try {
-                                val result = repository.recognizeImage(imageUri.toString())
-                                tags = result.getOrNull()?.map { it.confidence.toString() + "% " + it.tag.en } ?: emptyList()
-                                AnalyticsManager.logImageAnalysis(tags.size)
-                            } catch (e: Exception) {
-                                AnalyticsManager.logError("image_analysis", e.message ?: "Unknown error")
-                            } finally {
-                                isLoading = false
                             }
                         }
                     },

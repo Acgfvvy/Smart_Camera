@@ -1,49 +1,69 @@
 package com.abhyanshchannelac.smartcamera.repository
 
-import com.abhyanshchannelac.smartcamera.api.ImaggaService
-import com.abhyanshchannelac.smartcamera.api.Tag
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.Base64
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
+import com.google.gson.JsonParser
+import com.google.gson.JsonElement
 
 class ImageRecognitionRepository {
-    private val imaggaService: ImaggaService
+    private val clarifaiApiKey = "972ba2518e864b7e8aeba5881b2b5275"
+    private val clarifaiWorkflowId = "SmartCamFlow"
+    private val clarifaiUserId = "clarifai"
+    private val clarifaiAppId = "main"
 
-    init {
-        val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+    suspend fun getClarifaiTags(imageFile: File): List<String> = withContext(Dispatchers.IO) {
+        val bytes = imageFile.readBytes()
+        val base64Image = Base64.getEncoder().encodeToString(bytes)
+
+        val url = URL("https://api.clarifai.com/v2/users/$clarifaiUserId/apps/$clarifaiAppId/workflows/$clarifaiWorkflowId/results")
+        val connection = url.openConnection() as HttpURLConnection
+        connection.requestMethod = "POST"
+        connection.setRequestProperty("Authorization", "Key $clarifaiApiKey")
+        connection.setRequestProperty("Content-Type", "application/json")
+        connection.doOutput = true
+
+        val jsonInputString = """
+            {
+                "inputs": [
+                    {
+                        "data": {
+                            "image": {
+                            "base64": "$base64Image"
+                            }
+                        }
+                    }
+                ]
+            }
+        """
+
+        connection.outputStream.use { os ->
+            val input = jsonInputString.toByteArray()
+            os.write(input, 0, input.size)
         }
 
-        val client = OkHttpClient.Builder()
-            .addInterceptor(logging)
-            .build()
+        val responseCode = connection.responseCode
+        if (responseCode == HttpURLConnection.HTTP_OK) {
+            val response = connection.inputStream.bufferedReader().use { it.readText() }
+            val concepts = JsonParser().parse(response)
+                .asJsonObject["results"].asJsonArray[0]
+                .asJsonObject["outputs"].asJsonArray[0]
+                .asJsonObject["data"].asJsonObject["concepts"].asJsonArray
 
-        val retrofit = Retrofit.Builder()
-            .baseUrl("https://api.imagga.com")
-            .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-
-        imaggaService = retrofit.create(ImaggaService::class.java)
-    }
-
-    suspend fun recognizeImage(imageUrl: String): Result<List<Tag>> {
-        return try {
-            val auth = "Basic " + Base64.getEncoder().encodeToString(
-                "acc_a8ac440abdffb59:c9ca2b253d135d45eb2562cb5661a1d7".toByteArray()
-            )
-            
-            val response = imaggaService.getTags(auth, imageUrl)
-            if (response.isSuccessful) {
-                val tags = response.body()?.result?.tags ?: emptyList()
-                Result.success(tags)
-            } else {
-                Result.failure(Exception("Failed to recognize image: ${response.code()}"))
+            return@withContext concepts.map { concept: JsonElement ->
+                val name = concept.asJsonObject["name"].asString
+                val value = concept.asJsonObject["value"].asFloat * 100
+                "$name (${String.format("%.1f", value)}%)"
             }
-        } catch (e: Exception) {
-            Result.failure(e)
+        } else {
+            throw Exception("Clarifai API error: $responseCode")
         }
     }
 }
