@@ -208,7 +208,6 @@ fun MainScreen(
                                     object : ImageCapture.OnImageSavedCallback {
                                         override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                                             imageUri = Uri.fromFile(photoFile)
-                                            showCamera = false
                                             AnalyticsManager.logImageCapture(true)
                                             scope.launch {
                                                 try {
