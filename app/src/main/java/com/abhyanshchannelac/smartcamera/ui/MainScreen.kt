@@ -70,7 +70,7 @@ fun MainScreen(
     repository: ImageRecognitionRepository = remember { ImageRecognitionRepository() }
 ) {
     var imageUri by remember { mutableStateOf<Uri?>(null) }
-    var tags by remember { mutableStateOf<List<String>>(emptyList()) }
+    var tags by remember { mutableStateOf(emptyList<String>()) }
     var showCamera by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var isDarkTheme by remember { mutableStateOf(false) }
@@ -211,10 +211,12 @@ fun MainScreen(
                                             AnalyticsManager.logImageCapture(true)
                                             scope.launch {
                                                 try {
-                                                    tags = repository.getClarifaiTags(photoFile)
-                                                    AnalyticsManager.logImageAnalysis(tags.size)
+                                                    val newTags = repository.getClarifaiTags(photoFile)
+                                                    tags = newTags
+                                                    AnalyticsManager.logImageAnalysis(newTags.size)
                                                 } catch (e: Exception) {
                                                     AnalyticsManager.logError("image_analysis", e.message ?: "Unknown error")
+                                                    tags = emptyList()
                                                 } finally {
                                                     isLoading = false
                                                 }
