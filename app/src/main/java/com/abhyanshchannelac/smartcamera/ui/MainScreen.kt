@@ -1,9 +1,9 @@
 package com.abhyanshchannelac.smartcamera.ui
 
-import com.google.firebase.analytics.FirebaseAnalytics
 import android.Manifest
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -13,6 +13,9 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,17 +25,22 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.abhyanshchannelac.smartcamera.R
 import com.abhyanshchannelac.smartcamera.repository.ImageRecognitionRepository
+import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.google.firebase.ktx.Firebase
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import timber.log.Timber
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlinx.coroutines.launch
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.ui.text.font.FontWeight
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 object AnalyticsManager {
     private val crashlytics: FirebaseCrashlytics = FirebaseCrashlytics.getInstance()
@@ -64,7 +72,7 @@ object AnalyticsManager {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalCoroutinesApi::class)
 @Composable
 fun MainScreen(
     repository: ImageRecognitionRepository = remember { ImageRecognitionRepository() }
@@ -192,9 +200,9 @@ fun MainScreen(
                 Button(
                     onClick = {
                         scope.launch {
-                            isLoading = true
-                            val imageCapture = ImageCapture.Builder().build()
-                            imageCapture?.let { imageCapture ->
+                            try {
+                                isLoading = true
+                                val imageCapture = ImageCapture.Builder().build()
                                 val photoFile = File(
                                     context.getExternalFilesDir(null),
                                     SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.US).format(System.currentTimeMillis()) + ".jpg"
@@ -202,32 +210,45 @@ fun MainScreen(
 
                                 val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
 
-                                imageCapture.takePicture(
-                                    outputOptions,
-                                    ContextCompat.getMainExecutor(context),
-                                    object : ImageCapture.OnImageSavedCallback {
-                                        override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                                            imageUri = Uri.fromFile(photoFile)
-                                            AnalyticsManager.logImageCapture(true)
-                                            scope.launch {
-                                                try {
-                                                    val newTags = repository.getClarifaiTags(photoFile)
-                                                    tags = newTags
-                                                    AnalyticsManager.logImageAnalysis(newTags.size)
-                                                } catch (e: Exception) {
-                                                    AnalyticsManager.logError("image_analysis", e.message ?: "Unknown error")
-                                                    tags = emptyList()
-                                                } finally {
-                                                    isLoading = false
-                                                }
+                                // Take the picture
+                                suspendCancellableCoroutine<Unit> { continuation ->
+                                    imageCapture.takePicture(
+                                        outputOptions,
+                                        ContextCompat.getMainExecutor(context),
+                                        object : ImageCapture.OnImageSavedCallback {
+                                            override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                                                // Image saved successfully
+                                                continuation.resume(Unit, null)
+                                            }
+
+                                            override fun onError(exception: ImageCaptureException) {
+                                                continuation.resumeWithException(exception)
                                             }
                                         }
-
-                                        override fun onError(exception: ImageCaptureException) {
-                                            AnalyticsManager.logError("image_capture", exception.message ?: "Unknown error")
-                                        }
+                                    )
+                                }
+                                
+                                // Update the image URI
+                                imageUri = Uri.fromFile(photoFile)
+                                AnalyticsManager.logImageCapture(true)
+                                
+                                // Process the image with Clarifai
+                                try {
+                                    val newTags = withContext(Dispatchers.IO) {
+                                        repository.getClarifaiTags(photoFile)
                                     }
-                                )
+                                    tags = newTags
+                                    AnalyticsManager.logImageAnalysis(newTags.size)
+                                } catch (e: Exception) {
+                                    Timber.e(e, "Error analyzing image with Clarifai")
+                                    AnalyticsManager.logError("image_analysis", e.message ?: "Unknown error")
+                                    tags = emptyList()
+                                }
+                            } catch (e: Exception) {
+                                Timber.e(e, "Error capturing image")
+                                AnalyticsManager.logError("image_capture", e.message ?: "Unknown error")
+                            } finally {
+                                isLoading = false
                             }
                         }
                     },
